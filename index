@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storyboard Creator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Ensures the app uses the full screen */
+        body, #root {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Ensure body matches the app background */
+        }
+        /* Custom styles for printing and font */
+        .font-handwriting { font-family: 'Patrick Hand', cursive; }
+        @media print {
+            .no-print { display: none !important; }
+            /* Force 3 columns for better print layout */
+            .print-layout { 
+                display: grid !important; 
+                grid-template-columns: repeat(3, 1fr) !important; 
+                gap: 1.5rem !important; 
+            }
+            body { 
+                background: white; 
+                margin: 0; 
+                padding: 0;
+            }
+        }
+    </style>
+    <!-- Load custom font for annotations -->
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="root">
+        <!-- React App will render here -->
+    </div>
+    
+    <!-- Core React Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel Standalone for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- All React/JSX code must be wrapped in script type="text/babel" -->
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback, useLayoutEffect } = React;
+
+        // --- INLINE SVG ICONS (Defined at the top for maximum stability) ---
+        const Icon = ({ path, size = 24, className = "" }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={size} 
+                height={size} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className}
+            >
+                {path}
+            </svg>
+        );
+
+        // FIX: Wrapped adjacent JSX elements (SVG paths) in a React Fragment (<>...</>)
+        const Upload = (props) => <Icon {...props} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>} />;
+        const Printer = (props) => <Icon {...props} path={<><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></>} />;
+        const Plus = (props) => <Icon {...props} path={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>} />;
+        const ImageIcon = (props) => <Icon {...props} path={<><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></>} />;
+        const Trash2 = (props) => <Icon {...props} path={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 14v-4a2 2 0 0 1 4 0v4"/></>} />;
+        const MoveLeft = (props) => <Icon {...props} path={<><polyline points="17 8 7 12 17 16"/></>} />;
+        const MoveRight = (props) => <Icon {...props} path={<><polyline points="7 8 17 12 7 16"/></>} />;
+        const Pencil = (props) => <Icon {...props} path={<><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></>} />;
+        const Eraser = (props) => <Icon {...props} path={<><path d="M14.4 12a2 2 0 0 1 0 3l-1.5 1.5a2 2 0 0 1-3 0L3 10l6-6 6.5 6.5a2 2 0 0 1 0 3Z"/></>} />;
+        const Ban = (props) => <Icon {...props} path={<><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></>} />;
+        const Undo2 = (props) => <Icon {...props} path={<><path d="M9 14v-4a2 2 0 0 1 4 0v4"/><path d="M2 12A10 10 0 0 1 16 6l-3 4"/></>} />;
+        // --- END OF ICONS ---
+
+
+        /**
+         * Image Processing Helper
+         * Converts an image URL to a "sketch" style dataURL using HTML5 Canvas
+         */
+        const processImageToSketch = (imageSrc, intensity = 1.5) => {
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "Anonymous";
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              
+              // Scale down specifically for "sketchy" look
+              const scale = Math.min(1, 800 / Math.max(img.width, img.height));
+              canvas.width = img.width * scale;
+              canvas.height = img.height * scale;
+
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const data = imageData.data;
+              const width = canvas.width;
+              const height = canvas.height;
+
+              const outputData = ctx.createImageData(width, height);
+              const out = outputData.data;
+
+              // Simple Edge Detection (Sobel-like approach)
+              for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                  const idx = (y * width + x) * 4;
+                  const pixelIntensity = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+
+                  let rightIdx = ((y) * width + (x + 1)) * 4;
+                  let bottomIdx = ((y + 1) * width + (x)) * 4;
+
+                  if (x >= width - 1) rightIdx = idx;
+                  if (y >= height - 1) bottomIdx = idx;
+
+                  const rightIntensity = (data[rightIdx] + data[rightIdx + 1] + data[rightIdx + 2]) / 3;
+                  const bottomIntensity = (data[bottomIdx] + data[bottomIdx + 1] + data[bottomIdx + 2]) / 3;
+
+                  const diff = Math.abs(pixelIntensity - rightIntensity) + Math.abs(pixelIntensity - bottomIntensity);
+
+                  // Invert: Edges (high diff) become black (0), Flat areas (low diff) become white (255)
+                  let val = 255 - (diff * intensity * 2); 
+                  
+                  if (val > 240) val = 255; 
+                  if (val < 0) val = 0;
+
+                  out[idx] = val;     
+                  out[idx + 1] = val; 
+                  out[idx + 2] = val; 
+                  out[idx + 3] = 255; 
+                }
+              }
+
+              ctx.putImageData(outputData, 0, 0);
+              resolve(canvas.toDataURL());
+            };
+            img.src = imageSrc;
+          });
+        };
+
+        const DrawingCanvas = ({ drawingData, onSave, tool, color, isActive, undoTrigger }) => {
+          const canvasRef = useRef(null);
+          const parentRef = useRef(null);
+          const [isDrawing, setIsDrawing] = useState(false);
+          const [history, setHistory] = useState([]); // Stack of dataURLs for undo
+          const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+          const lastPos = useRef({ x: 0, y: 0 });
+
+          // 1. Responsive Sizing: Track parent size safely
+          useLayoutEffect(() => {
+            const parent = parentRef.current?.parentElement;
+            if (!parent) return;
+
+            const resizeObserver = new ResizeObserver((entries) => {
+              if (!entries || entries.length === 0) return;
+              
+              const { clientWidth, clientHeight } = parent;
+              
+              // Only update if dimensions actually changed
+              setCanvasSize(prev => {
+                if (prev.width === clientWidth && prev.height === clientHeight) {
+                  return prev;
+                }
+                return { width: clientWidth, height: clientHeight };
+              });
+            });
+
+            resizeObserver.observe(parent);
+            return () => resizeObserver.disconnect();
+          }, []);
+
+          // 2. Setup Canvas (DPI Scaling & Redraw)
+          useEffect(() => {
+            const canvas = canvasRef.current;
+            // Only proceed if size is valid
+            if (!canvas || canvasSize.width === 0 || canvasSize.height === 0) return;
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvasSize.width * dpr;
+            canvas.height = canvasSize.height * dpr;
+
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Redraw existing data
+            if (drawingData) {
+              const img = new Image();
+              img.onload = () => {
+                ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
+                ctx.drawImage(img, 0, 0, canvasSize.width, canvasSize.height);
+              };
+              img.src = drawingData;
+            } else {
+               ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
+            }
+          }, [canvasSize.width, canvasSize.height, drawingData]);
+
+          // 3. Undo Logic
+          const handleUndo = useCallback(() => {
+            if (history.length === 0) {
+                // If history is empty, clear the canvas data
+                onSave(null);
+                setHistory([]);
+                return;
+            }
+            const newHistory = [...history];
+            newHistory.pop(); 
+            const previousState = newHistory[newHistory.length - 1]; 
+            setHistory(newHistory);
+            onSave(previousState || null);
+          }, [history, onSave]);
+
+          // Listen for external undo trigger (button click)
+          useEffect(() => {
+            if (undoTrigger > 0) handleUndo();
+          }, [undoTrigger, handleUndo]);
+
+          // Keyboard Undo
+          useEffect(() => {
+            const handleKeyDown = (e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                if (isActive) { 
+                  e.preventDefault();
+                  handleUndo();
+                }
+              }
+            };
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+          }, [isActive, handleUndo]);
+
+          const getCoords = (e) => {
+            const canvas = canvasRef.current;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+              x: clientX - rect.left,
+              y: clientY - rect.top
+            };
+          };
+
+          const startDrawing = (e) => {
+            if (!isActive) return;
+            e.preventDefault(); // Prevents scroll on touch
+            
+            // Save state before new stroke (limit history to 20 states)
+            const canvas = canvasRef.current;
+            if (canvas) {
+                setHistory(prev => [...prev.slice(-19), canvas.toDataURL()]);
+            }
+
+            setIsDrawing(true);
+            const coords = getCoords(e);
+            lastPos.current = coords;
+
+            const ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.moveTo(coords.x, coords.y);
+            ctx.lineTo(coords.x, coords.y);
+            
+            if (tool === 'eraser') {
+              ctx.globalCompositeOperation = 'destination-out';
+              ctx.lineWidth = 20;
+            } else {
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.strokeStyle = color; 
+              ctx.lineWidth = 2;
+            }
+            ctx.stroke();
+          };
+
+          const draw = (e) => {
+            if (!isDrawing || !isActive) return;
+            e.preventDefault();
+
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const coords = getCoords(e);
+
+            ctx.beginPath();
+            ctx.moveTo(lastPos.current.x, lastPos.current.y);
+            ctx.lineTo(coords.x, coords.y);
+            
+            if (tool === 'eraser') {
+              ctx.globalCompositeOperation = 'destination-out';
+              ctx.lineWidth = 20;
+            } else {
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.strokeStyle = color; 
+              ctx.lineWidth = 2; 
+            }
+            
+            ctx.stroke();
+            lastPos.current = coords;
+          };
+
+          const stopDrawing = () => {
+            if (isDrawing) {
+              setIsDrawing(false);
+              if (canvasRef.current) {
+                onSave(canvasRef.current.toDataURL());
+              }
+            }
+          };
+
+          return (
+            <div ref={parentRef} className="absolute inset-0 pointer-events-none">
+                <canvas
+                ref={canvasRef}
+                style={{ width: '100%', height: '100%', touchAction: 'none' }}
+                className={`absolute inset-0 z-20 ${isActive ? (tool === 'eraser' ? 'cursor-crosshair pointer-events-auto' : 'cursor-crosshair pointer-events-auto') : 'pointer-events-none'}`}
+                onMouseDown={startDrawing}
+                onMouseMove={draw}
+                onMouseUp={stopDrawing}
+                onMouseLeave={stopDrawing}
+                onTouchStart={startDrawing}
+                onTouchMove={draw}
+                onTouchEnd={stopDrawing}
+                />
+            </div>
+          );
+        };
+
+        const PanelCard = ({ panel, index, updatePanel, removePanel, movePanel }) => {
+          const [isEditingAnnotation, setIsEditingAnnotation] = useState(false);
+          const [isDrawingMode, setIsDrawingMode] = useState(false);
+          const [tool, setTool] = useState('pen'); 
+          const [penColor, setPenColor] = useState('#000000');
+          const [undoTrigger, setUndoTrigger] = useState(0); // To signal undo from button
+          
+          const textAreaRef = useRef(null);
+          useEffect(() => {
+            if (textAreaRef.current) {
+              textAreaRef.current.style.height = "auto";
+              textAreaRef.current.style.height = textAreaRef.current.scrollHeight + "px";
+            }
+          }, [panel.annotation]);
+
+          const handleClearDrawing = () => {
+            // FIX: Removed window.confirm and replaced with a direct action and console log.
+            console.warn(`Panel ${panel.panelNum} drawing cleared.`);
+            updatePanel(panel.id, { drawingData: null });
+          };
+
+          return (
+            <div className="bg-white p-2 border-2 border-gray-300 shadow-sm hover:shadow-md transition-shadow break-inside-avoid mb-6 print:mb-4 print:break-inside-avoid flex flex-col rounded-lg">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-1 text-sm font-bold font-mono border-b-2 border-gray-800 pb-1">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center border border-gray-800 px-1 bg-gray-50 rounded">
+                    <span className="mr-1 text-gray-500 text-xs uppercase">Scene:</span>
+                    <input 
+                      type="text" 
+                      value={panel.scene} 
+                      onChange={(e) => updatePanel(panel.id, { scene: e.target.value })}
+                      className="w-8 bg-transparent focus:outline-none text-center"
+                    />
+                  </div>
+                  <div className="flex items-center border border-gray-800 px-1 bg-gray-50 rounded">
+                    <span className="mr-1 text-gray-500 text-xs uppercase">Panel:</span>
+                    <input 
+                      type="text" 
+                      value={panel.panelNum} 
+                      onChange={(e) => updatePanel(panel.id, { panelNum: e.target.value })}
+                      className="w-8 bg-transparent focus:outline-none text-center"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex gap-1 print:hidden opacity-50 hover:opacity-100 transition-opacity duration-200">
+                   <button onClick={() => movePanel(index, -1)} disabled={index === 0} className="p-1 hover:bg-gray-100 rounded disabled:opacity-20" title="Move Left">
+                    <MoveLeft size={14} />
+                  </button>
+                  <button onClick={() => movePanel(index, 1)} disabled={index === -1} className="p-1 hover:bg-gray-100 rounded" title="Move Right">
+                    <MoveRight size={14} />
+                  </button>
+                  <button onClick={() => removePanel(panel.id)} className="p-1 hover:bg-red-100 text-red-500 rounded" title="Delete Panel">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Image Area */}
+              <div 
+                className="relative border-2 border-gray-900 mb-2 bg-gray-100 group overflow-hidden rounded-md"
+              >
+                
+                {/* Toolbar */}
+                <div className="absolute top-2 right-2 z-30 flex flex-col gap-1 print:hidden opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-end">
+                   <button 
+                    onClick={() => setIsDrawingMode(!isDrawingMode)}
+                    className={`p-2 rounded-full shadow-md border ${isDrawingMode ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-gray-600 border-gray-300'}`}
+                    title={isDrawingMode ? "Stop Drawing" : "Draw on Panel"}
+                   >
+                     <Pencil size={16} />
+                   </button>
+                   
+                   {isDrawingMode && (
+                     <div className="flex flex-col gap-1 mt-1 bg-white/90 backdrop-blur p-2 rounded-lg border border-gray-200 shadow-lg">
+                      <div className="flex gap-1 mb-1 border-b pb-1">
+                        <button 
+                          onClick={() => setTool('pen')}
+                          className={`p-1.5 rounded-full ${tool === 'pen' ? 'bg-indigo-100 text-indigo-700' : 'hover:bg-gray-100'}`}
+                          title="Pen"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button 
+                          onClick={() => setTool('eraser')}
+                          className={`p-1.5 rounded-full ${tool === 'eraser' ? 'bg-indigo-100 text-indigo-700' : 'hover:bg-gray-100'}`}
+                          title="Eraser"
+                        >
+                          <Eraser size={14} />
+                        </button>
+                      </div>
+                      
+                      {/* Color Picker */}
+                      <div className="grid grid-cols-2 gap-1 p-1 bg-gray-50 rounded-md">
+                        {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f97316', '#a855f7'].map(c => (
+                          <button
+                            key={c}
+                            onClick={() => { setPenColor(c); setTool('pen'); }}
+                            className={`w-5 h-5 rounded-full border border-gray-300 ${penColor === c && tool === 'pen' ? 'ring-2 ring-offset-2 ring-indigo-500' : ''}`}
+                            style={{ backgroundColor: c }}
+                            title={c}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="w-full h-px bg-gray-200 my-1"></div>
+                      
+                      <button 
+                        onClick={() => setUndoTrigger(prev => prev + 1)}
+                        className="flex items-center justify-center p-1.5 rounded hover:bg-gray-100 text-gray-700 text-xs gap-1 w-full"
+                        title="Undo (Ctrl+Z)"
+                      >
+                        <Undo2 size={14} />
+                      </button>
+                      
+                      <button 
+                        onClick={handleClearDrawing}
+                        className="flex items-center justify-center p-1.5 rounded hover:bg-red-50 text-red-500 text-xs gap-1 w-full"
+                        title="Clear All"
+                      >
+                        <Ban size={14} />
+                      </button>
+                     </div>
+                   )}
+                </div>
+                
+                {/* Content */}
+                <div className="relative w-full aspect-[4/3] overflow-hidden">
+                    {panel.sketchUrl ? (
+                      <>
+                        <img 
+                          src={panel.sketchUrl} 
+                          alt="Storyboard Sketch" 
+                          className="absolute inset-0 w-full h-full object-contain filter contrast-125 pointer-events-none select-none"
+                        />
+                        
+                        <DrawingCanvas 
+                          drawingData={panel.drawingData}
+                          onSave={(data) => updatePanel(panel.id, { drawingData: data })}
+                          tool={tool}
+                          color={penColor}
+                          isActive={isDrawingMode}
+                          undoTrigger={undoTrigger}
+                        />
+                      </>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-100 text-gray-400 animate-pulse">
+                        Processing image to sketch...
+                      </div>
+                    )}
+                </div>
+              </div>
+
+              {/* Annotation */}
+              <div className="relative min-h-[3rem]">
+                {isEditingAnnotation ? (
+                  <textarea
+                    ref={textAreaRef}
+                    className="w-full p-1 text-sm font-handwriting border-b border-dashed border-indigo-400 focus:outline-none focus:border-indigo-500 bg-yellow-50 resize-none overflow-hidden rounded-b-md"
+                    value={panel.annotation}
+                    placeholder="Add dialogue, camera movement, or action..."
+                    onChange={(e) => updatePanel(panel.id, { annotation: e.target.value })}
+                    onBlur={() => setIsEditingAnnotation(false)}
+                    autoFocus
+                  />
+                ) : (
+                  <div 
+                    onClick={() => setIsEditingAnnotation(true)}
+                    className={`w-full p-1 text-sm cursor-text min-h-[2rem] hover:bg-yellow-50/50 transition-colors rounded-md ${!panel.annotation ? 'text-gray-400 italic' : 'text-gray-800 font-handwriting'}`}
+                  >
+                    {panel.annotation || "Click to add notes..."}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        const App = () => {
+          const [panels, setPanels] = useState([]);
+          const [projectTitle, setProjectTitle] = useState("New Storyboard Draft");
+          const fileInputRef = useRef(null);
+
+          const handleFileUpload = async (e) => {
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
+
+            let startIdx = panels.length;
+            
+            // Temporary list to process files sequentially for sketch effect
+            const filesToProcess = [];
+
+            for (const file of files) {
+              startIdx++;
+              const originalUrl = URL.createObjectURL(file);
+              const tempId = Math.random().toString(36).substr(2, 9);
+              
+              const newPanel = {
+                id: tempId,
+                originalUrl,
+                sketchUrl: null, 
+                drawingData: null, 
+                scene: '1',
+                panelNum: startIdx.toString(),
+                annotation: ''
+              };
+
+              filesToProcess.push({ newPanel, file, originalUrl, tempId });
+            }
+
+            // Add all placeholders at once
+            setPanels(prev => [...prev, ...filesToProcess.map(f => f.newPanel)]);
+
+            // Process and update one by one to avoid blocking the UI
+            for (const { newPanel, originalUrl, tempId } of filesToProcess) {
+                try {
+                    const sketchUrl = await processImageToSketch(originalUrl);
+                    setPanels(prev => prev.map(p => p.id === tempId ? { ...p, sketchUrl } : p));
+                } catch (error) {
+                    console.error("Error processing image:", error);
+                    setPanels(prev => prev.map(p => p.id === tempId ? { ...p, sketchUrl: 'placeholder' } : p)); // Fallback
+                }
+            }
+            
+            if (fileInputRef.current) fileInputRef.current.value = '';
+          };
+
+          const updatePanel = (id, updates) => {
+            setPanels(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+          };
+
+          const removePanel = (id) => {
+            setPanels(prev => prev.filter(p => p.id !== id));
+          };
+
+          const movePanel = (index, direction) => {
+            const newPanels = [...panels];
+            const targetIndex = index + direction;
+            if (targetIndex < 0 || targetIndex >= newPanels.length) return;
+            
+            [newPanels[index], newPanels[targetIndex]] = [newPanels[targetIndex], newPanels[index]];
+            setPanels(newPanels);
+          };
+
+          const handlePrint = () => {
+            // FIX: Added console log guidance for the user since we rely on the browser's print-to-PDF function.
+            console.log("--- EXPORT PDF INSTRUCTION ---");
+            console.log("To save this storyboard as a PDF, please open the print dialog (which should appear now) and change the Destination to 'Save as PDF' or 'Microsoft Print to PDF'.");
+            console.log("------------------------------");
+            window.print();
+          };
+
+          const renderEmptyState = () => (
+            <div className="text-center py-20 border-4 border-dashed border-indigo-300 rounded-xl bg-white shadow-xl">
+                <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Upload size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-gray-700 mb-2">Start Your Storyboard</h3>
+                <p className="text-gray-500 mb-6 max-w-md mx-auto">
+                    Upload photos or screenshots (PNG, JPG) to automatically convert them into clean sketch panels.
+                </p>
+                <button 
+                    onClick={() => fileInputRef.current.click()}
+                    className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 transition shadow-lg shadow-indigo-500/50"
+                >
+                    Upload Images
+                </button>
+            </div>
+          );
+
+          return (
+            <div className="min-h-screen bg-gray-100 font-sans text-gray-900 pb-20">
+              <header className="bg-white shadow-md sticky top-0 z-10 no-print border-b border-gray-300">
+                <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-600 text-white rounded-lg shadow-lg">
+                       <ImageIcon size={20} />
+                    </div>
+                    <input 
+                      value={projectTitle}
+                      onChange={(e) => setProjectTitle(e.target.value)}
+                      className="text-xl font-extrabold bg-transparent border-none focus:ring-0 placeholder-gray-400 w-full md:w-auto"
+                      placeholder="Project Title"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => fileInputRef.current.click()}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-full font-medium transition-colors shadow-lg shadow-indigo-500/50"
+                    >
+                      <Plus size={18} />
+                      <span className="hidden sm:inline">Add Images</span>
+                    </button>
+                    <button 
+                      onClick={handlePrint}
+                      className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-full font-medium transition-colors shadow-sm"
+                    >
+                      <Printer size={18} />
+                      <span className="hidden sm:inline">Export PDF</span>
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="image/*" 
+                multiple 
+                onChange={handleFileUpload} 
+              />
+
+              <main className="max-w-[1200px] mx-auto p-6 sm:p-8">
+                <div className="hidden print:block mb-8">
+                    <h1 className="text-3xl font-bold mb-2">{projectTitle}</h1>
+                    <div className="h-1 w-full bg-black"></div>
+                </div>
+
+                {panels.length === 0 ? (
+                    renderEmptyState()
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 print-layout">
+                    {panels.map((panel, index) => (
+                      <PanelCard 
+                        key={panel.id} 
+                        index={index}
+                        panel={panel} 
+                        updatePanel={updatePanel}
+                        removePanel={removePanel}
+                        movePanel={movePanel}
+                      />
+                    ))}
+                  </div>
+                )}
+              </main>
+
+              {panels.length > 0 && (
+                <div className="fixed bottom-6 right-6 no-print">
+                  <div className="bg-white p-4 rounded-lg shadow-xl border border-gray-200 max-w-xs text-sm text-gray-600">
+                    <p className="font-bold text-gray-800 mb-1">Drawing Tips:</p>
+                    <ul className="list-disc pl-4 space-y-1">
+                      <li>Click the <Pencil size={12} className="inline" /> icon on any panel to activate drawing mode.</li>
+                      <li>Use **Ctrl + Z** (or Cmd + Z on Mac) to quickly undo strokes.</li>
+                      <li>Click the note area to add **Dialogue** or **Action** descriptions.</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        // Mount the application
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App, null));
+    </script>
+</body>
+</html>
